@@ -1,9 +1,12 @@
 // up aplica el cambio de esquema al avanzar la migración.
 exports.up = (pgm) => {
+  pgm.createExtension('pgcrypto', { ifNotExists: true });
+
   pgm.createTable('users', {
     id: {
-      type: 'bigserial',
+      type: 'uuid',
       primaryKey: true,
+      default: pgm.func('gen_random_uuid()'),
     },
     name: {
       type: 'varchar(100)',
