@@ -16,7 +16,10 @@ const errorHandler = (error, req, res, next) => {
 
   res.status(statusCode).json({
     success: false,
-    message: error.message || 'Error interno del servidor',
+    // Solo los errores controlados pueden mostrar su mensaje al cliente.
+    message: statusCode >= 500
+      ? 'Error interno del servidor'
+      : error.message,
   });
 };
 

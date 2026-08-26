@@ -3,6 +3,13 @@ const jwt = require('jsonwebtoken');
 
 const userRepository = require('../repositories/userRepository');
 const AppError = require('../utils/AppError');
+const {
+  todayInAppTimeZone,
+  validateIsoDate,
+} = require('../utils/dateRange');
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_PASSWORD_BYTES = 72;
 
 // Genera un token firmado. El payload queda vacío porque la identidad se
 // representa mediante el claim estándar sub (subject).
@@ -20,7 +27,8 @@ const createToken = (userId) => {
   });
 };
 
-// Validación compartida por registro e inicio de sesión.
+// Validación compartida por registro e inicio de sesión. El límite de 72 bytes
+// evita que bcrypt trunque silenciosamente contraseñas más largas.
 const validateCredentials = (email, password) => {
   if (!email || !password) {
     throw new AppError(
@@ -35,18 +43,85 @@ const validateCredentials = (email, password) => {
       400
     );
   }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (
+    normalizedEmail.length > 255 ||
+    !EMAIL_PATTERN.test(normalizedEmail)
+  ) {
+    throw new AppError('El correo electrónico no tiene un formato válido', 400);
+  }
+
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
+    throw new AppError('La contraseña no puede superar 72 bytes', 400);
+  }
+
+  return normalizedEmail;
+};
+
+const optionalNumber = (value, fieldName, minimum, maximum) => {
+  if (value === '' || value === null || value === undefined) return null;
+
+  const parsedValue = Number(value);
+  if (
+    !Number.isFinite(parsedValue) ||
+    parsedValue < minimum ||
+    parsedValue > maximum
+  ) {
+    throw new AppError(
+      `${fieldName} debe estar entre ${minimum} y ${maximum}`,
+      400
+    );
+  }
+
+  return parsedValue;
+};
+
+const optionalText = (value, fieldName, maximumLength) => {
+  if (value === '' || value === null || value === undefined) return null;
+
+  if (typeof value !== 'string' || value.trim().length > maximumLength) {
+    throw new AppError(
+      `${fieldName} debe ser texto de hasta ${maximumLength} caracteres`,
+      400
+    );
+  }
+
+  return value.trim() || null;
 };
 
 const register = async (userData) => {
   const { name, email, password } = userData;
 
-  validateCredentials(email, password);
+  const normalizedEmail = validateCredentials(email, password);
 
-  if (typeof name !== 'string' || !name.trim()) {
-    throw new AppError('El nombre es obligatorio', 400);
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) {
+    throw new AppError(
+      'El nombre es obligatorio y no puede superar 100 caracteres',
+      400
+    );
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  if (password.length < 8) {
+    throw new AppError(
+      'La contraseña debe contener al menos 8 caracteres',
+      400
+    );
+  }
+
+  const birthDate = userData.birth_date
+    ? validateIsoDate(userData.birth_date, 'La fecha de nacimiento')
+    : null;
+
+  if (birthDate && birthDate > todayInAppTimeZone()) {
+    throw new AppError('La fecha de nacimiento no puede estar en el futuro', 400);
+  }
+
+  const gender = optionalText(userData.gender, 'El género', 30);
+  const height = optionalNumber(userData.height, 'La altura', 50, 300);
+  const weight = optionalNumber(userData.weight, 'El peso', 20, 500);
+
   // Nunca se almacena la contraseña original. bcrypt añade salt y aplica un
   // algoritmo deliberadamente costoso para dificultar ataques por fuerza bruta.
   const passwordHash = await bcrypt.hash(password, 10);
@@ -56,10 +131,11 @@ const register = async (userData) => {
       name: name.trim(),
       email: normalizedEmail,
       passwordHash,
-      gender: userData.gender || null,
-      birthDate: userData.birth_date || null,
-      height: userData.height || null,
-      weight: userData.weight || null,
+      gender,
+      birthDate,
+      height,
+      weight,
+      weightLogDate: todayInAppTimeZone(),
     });
 
     return { user, token: createToken(user.id) };
@@ -77,10 +153,10 @@ const register = async (userData) => {
 };
 
 const login = async ({ email, password }) => {
-  validateCredentials(email, password);
+  const normalizedEmail = validateCredentials(email, password);
 
   const user = await userRepository.findAuthByEmail(
-    email.trim().toLowerCase()
+    normalizedEmail
   );
 
   // bcrypt.compare calcula el hash de forma segura y lo compara con el guardado.
