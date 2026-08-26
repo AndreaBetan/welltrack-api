@@ -1,8 +1,6 @@
 const userRepository = require('../repositories/userRepository');
 const AppError = require('../utils/AppError');
-
-// El servicio contiene reglas de negocio; desconoce los detalles SQL.
-const getUsers = () => userRepository.findAll();
+const { todayInAppTimeZone } = require('../utils/dateRange');
 
 const getCurrentUser = async (userId) => {
   const user = await userRepository.findPublicById(userId);
@@ -52,6 +50,7 @@ const updateCurrentUser = async (userId, userData) => {
     birthDate: birth_date || null,
     height: parsedHeight,
     weight: parsedWeight,
+    weightLogDate: todayInAppTimeZone(),
   });
 
   if (!user) {
@@ -62,7 +61,6 @@ const updateCurrentUser = async (userId, userData) => {
 };
 
 module.exports = {
-  getUsers,
   getCurrentUser,
   updateCurrentUser,
 };

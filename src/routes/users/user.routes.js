@@ -12,6 +12,5 @@ router.use(authenticate);
 // recibido del cliente. Esto evita que un usuario modifique otro perfil.
 router.get('/me', userController.getMe);
 router.patch('/me', userController.updateMe);
-router.get('/', userController.getUsers);
 
 module.exports = router;
