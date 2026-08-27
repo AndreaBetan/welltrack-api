@@ -32,7 +32,18 @@ const registerRateLimiter = rateLimit({
   },
 });
 
+const passwordResetRateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  message: {
+    success: false,
+    message: 'Se han realizado demasiadas solicitudes. Inténtalo más tarde',
+  },
+});
+
 module.exports = {
   loginRateLimiter,
   registerRateLimiter,
+  passwordResetRateLimiter,
 };

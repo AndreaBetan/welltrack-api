@@ -1,7 +1,10 @@
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 const userRepository = require('../repositories/userRepository');
+const emailRepository = require('../repositories/emailRepository');
+const emailService = require('./emailService');
 const AppError = require('../utils/AppError');
 const {
   todayInAppTimeZone,
@@ -10,6 +13,7 @@ const {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_PASSWORD_BYTES = 72;
+const PASSWORD_RESET_MINUTES = 30;
 
 // Genera un token firmado. El payload queda vacío porque la identidad se
 // representa mediante el claim estándar sub (subject).
@@ -138,6 +142,12 @@ const register = async (userData) => {
       weightLogDate: todayInAppTimeZone(),
     });
 
+    // El alta ya está confirmada antes del envío. Un fallo temporal del proveedor
+    // de correo se registra, pero no convierte una cuenta válida en error HTTP.
+    emailService.sendWelcomeEmail(user).catch((error) => {
+      console.error('No se pudo enviar el correo de bienvenida:', error.message);
+    });
+
     return { user, token: createToken(user.id) };
   } catch (error) {
     // PostgreSQL utiliza 23505 para una violación de restricción UNIQUE.
@@ -150,6 +160,60 @@ const register = async (userData) => {
 
     throw error;
   }
+};
+
+const requestPasswordReset = async ({ email }) => {
+  if (typeof email !== 'string' || !EMAIL_PATTERN.test(email.trim().toLowerCase())) {
+    throw new AppError('El correo electrónico no tiene un formato válido', 400);
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await userRepository.findEmailRecipientByEmail(normalizedEmail);
+
+  // La misma respuesta se devuelve exista o no la cuenta, evitando enumeración
+  // de usuarios. Solo se crea y envía el token cuando el destinatario existe.
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_MINUTES * 60 * 1000);
+
+    await emailRepository.replacePasswordResetToken({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+
+    emailService.sendPasswordResetEmail(user, token, PASSWORD_RESET_MINUTES)
+      .catch((error) => {
+        console.error('No se pudo enviar la recuperación de contraseña:', error.message);
+      });
+  }
+
+  return {
+    message: 'Si existe una cuenta con ese correo, recibirás las instrucciones para restablecer la contraseña',
+  };
+};
+
+const resetPassword = async ({ token, password }) => {
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new AppError('El enlace de recuperación no es válido o ha caducado', 400);
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    throw new AppError('La contraseña debe contener al menos 8 caracteres', 400);
+  }
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
+    throw new AppError('La contraseña no puede superar 72 bytes', 400);
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const passwordHash = await bcrypt.hash(password, 10);
+  const updated = await emailRepository.consumePasswordResetToken({ tokenHash, passwordHash });
+
+  if (!updated) {
+    throw new AppError('El enlace de recuperación no es válido o ha caducado', 400);
+  }
+
+  return { message: 'La contraseña se ha actualizado correctamente' };
 };
 
 const login = async ({ email, password }) => {
@@ -173,4 +237,6 @@ const login = async ({ email, password }) => {
 module.exports = {
   register,
   login,
+  requestPasswordReset,
+  resetPassword,
 };

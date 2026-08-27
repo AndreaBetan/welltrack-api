@@ -76,6 +76,15 @@ const findAuthByEmail = async (email) => {
   return result.rows[0] || null;
 };
 
+// Consulta mínima usada para iniciar la recuperación. No expone el hash.
+const findEmailRecipientByEmail = async (email) => {
+  const result = await query(
+    'SELECT id, name, email FROM users WHERE email = $1 LIMIT 1',
+    [email]
+  );
+  return result.rows[0] || null;
+};
+
 const findPublicById = async (id) => {
   const result = await query(
     `
@@ -165,6 +174,7 @@ const updateById = async (
 module.exports = {
   create,
   findAuthByEmail,
+  findEmailRecipientByEmail,
   findPublicById,
   updateById,
 };

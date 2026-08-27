@@ -18,6 +18,11 @@ const pool = new Pool({
   max: process.env.DB_POOL_MAX,
   idleTimeoutMillis: process.env.DB_IDLE_TIMEOUT,
   connectionTimeoutMillis: process.env.DB_CONNECTION_TIMEOUT,
+  // Mantiene el mismo criterio que las migraciones: cifra el canal y exige un
+  // certificado emitido por una autoridad reconocida.
+  ssl: process.env.DB_SSL === 'true'
+    ? { rejectUnauthorized: true }
+    : false,
 });
 
 module.exports = pool;
